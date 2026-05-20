@@ -79,3 +79,4 @@ Matches order, size, and alignment of fields from C, the type is also passed alo
         - It is UB to construct an instance of an enum that does not match one of its variants, allowing exhaustive matches to be written and compiled as normal 
 
 #### repr(transparent)
+`#[repr(transparent)]`
