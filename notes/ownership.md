@@ -267,6 +267,7 @@ Unsafe can often produce references from nothing and are considered unbounded. T
 No reference is `'static`, which is likely wrong. Unbounded lifetimes should be bounded as quickly as possible, especially across function boundaries. Given a function, any output lifetimes that don't derive from inputs are unbounded.
 
 Example: ```
+// raw pointer usage prevents lifetime validation, if 's < 'a, compiler cannot detect this since raw pointer, can instead bound lifetime
 fn get_str<'a>(s: *const String) -> &'a str {
     unsafe { &*s }
 }
@@ -311,3 +312,56 @@ Alternatively:
 `where F: for<'a> Fn(&'a (u8, u16)) -> &'a u8`
 
 `for<'a>` is read as "for all choices of `'a`" and produces an infinite list of trait bounds that F must satisfy. There aren't many places outside of `Fn` where HRTBs are encountered.
+
+## Subtyping and Variance
+Lifetimes track relationships between borrows and ownership. A naive implementation would either be too restrictive or cause UB. In order to allow flexible usage of lifetimes while preventing their misuse, Rust uses subtyping and variance.
+
+Example: ```
+fn debug<'a>(a: &'a str, b: &'a str) {
+    println!("a = {a:?}, b = {b:?}");
+}
+
+fn main() {
+    let hello = &'static str = "hello";
+    {
+        let world = String::from("world");
+        let world = &world;
+
+        // world has a shorter lifetime than static
+        debug(hello, world);
+    }
+}```
+
+In a conservative implementation of lifetimes, since `hello` and `world` have different lifetimes, may see type mismatch or lifetime error. In this case, want to accept any type that lives at least as long as `'world`.
+
+### Subtyping
+Subtyping is the idea that one type can be used in place of another. `Sub` is a subtype of `Super`, `Sub <: Super`. The set of requirements super defines The set of requirements `Super` defines are completely satisfied by `Sub`, `Sub` may then have more requirements. In order to use subtyping, requirements of lifetime: `'a` defines a region of code.
+
+Lifetime relations:
+`long <: 'short` if and only if `'long` defines a region of code that completely contains `'short`. `'long` may contain a region larger than `'short`.
+
+In previous example, `'static <: world`. Subtypes of lifetimes can be passed through references, `&'static str` is a subtype of `&'world str`, then `&'static str` is downgradeable to `&'world str`
+
+### Variance
+`'static <: 'b` implying `&'static T <: &'b T` uses property called variance.
+
+Example: ```
+fn assign<T>(input: &mut T, value: T) {
+    *input = value;
+}
+
+fn main() {
+    let mut hello = "hello";
+
+    {
+        let world = String::from("world");
+        // world is dropped after this point, creating UAF because hello points to world
+        assign(&mut hello, &world);
+    }
+
+    println!("{hello}");
+}```
+
+In assign, the `hello` reference points to `world`, but `world` drops `hello` prints. This problem means the assumption that `&mut &'static str <: &mut &'b str` is incorrect, meaning that `&mut &'static str` cannot be a subtype of `&mut &'static b` even if `'static <: 'b`
+
+Variance is the concept Rust borrows to define relationships about subtypes through generic parameters.
