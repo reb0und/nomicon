@@ -355,13 +355,44 @@ fn main() {
 
     {
         let world = String::from("world");
-        // world is dropped after this point, creating UAF because hello points to world
+        // world does not live beyond the function and and its borrow is attempted to move into hello which has a greater lifetime, this is a UAF because &world does not outlive hello
         assign(&mut hello, &world);
     }
 
     println!("{hello}");
 }```
 
-In assign, the `hello` reference points to `world`, but `world` drops `hello` prints. This problem means the assumption that `&mut &'static str <: &mut &'b str` is incorrect, meaning that `&mut &'static str` cannot be a subtype of `&mut &'static b` even if `'static <: 'b`
+In `assign`, the `hello` reference is set to `&world` which does not outlive the scope befor the later use of `hello`, creating a UAF. The problem is that the assuming `&mut 'static str` and `&mut &'b str` are compatible is correct, meaning `&mut &'static str` cannot be a subtype of `&mut &'b str`, even if `'static <: 'a`. Variance is the concept Rust defines to allow defining relationships about subtypes through their parameters.
 
-Variance is the concept Rust borrows to define relationships about subtypes through generic parameters.
+The type `F`'s variance is how the subtyping of its inputs affects the subtyping of its outputs. There are three kinds of variance in Rust. Given `Sub` and `Super`, where `Sub` is a subtype of `Super`.
+- `F` is covariant if `F<Sub>` is a subtype of `F<Super>` (the subtype property is passed through) property
+- `F` is contravariant if `F<Super>` is a subtype of `F<Sub>` (the subtype property is inverted)
+- `F` is invariant otherwise (no subtyping relationship exists)
+
+It is okay to treat `&'a T` as a subtype of `&'b T` if `'a <: 'b`, therefore `&'a T` is covariant over `'a`. Also it is bad to treat `&mut &'a T` as a subtype of `&mut &'b T`, therefore `&mut T` is invariant over `T`.
+
+- `Vec<T>` and all other owning pointers and collections follow the same logic as `Box<T>`
+- `Cell<T>` and all other interior mutability types follow the same logic as `UnsafeCell<T>`
+- `UnsafeCell<T>` having interior mutability gives it the same variance as `&mut T`
+- `*const T` follows the logic of `&T`
+- `*mut T` follows the logic of `&mut T` (or `UnsafeCell<T>`)
+
+Function arguments are the only source of contravariance. Invoking contravariance involves higher-order programming with function pointers that take references with specific lifetimes (as opposed to the usual "lifetime", which gets into higher rank lifetimes, which work independently of subtyping)
+
+Example: ```
+fn assign<T>(input: &mut T, val: T) {
+    *input = val;
+}
+
+fn main() {
+    let mut hello = "hello";
+
+    {
+        let world = String::from("world");
+        assign(&mut hello, &world);
+    }
+
+    println!("{hello}");
+}```
+
+The assign function tkaes a mutable reference and a value and overwrites the referent with it. This function creates a type
