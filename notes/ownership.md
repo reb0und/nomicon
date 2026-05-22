@@ -395,4 +395,59 @@ fn main() {
     println!("{hello}");
 }```
 
-The assign function tkaes a mutable reference and a value and overwrites the referent with it. This function creates a type
+The assign function takes a mutable reference and a value and overwrites the referent with it. This function creates a type equality constraint that the input and value must be same type. `&'static mut str` and `&'world mut str` are passed. Since `&mut T` is invariant over `T`, the compiler concludes it can't apply any subtyping to first argument so `T` must be exactly `&'static str`.
+
+Counter to the `&T` case:
+Example: ```
+fn debug<T: std::fmt::Debug>(a: T, b: T) {
+    println!("a = {a:?}, b = {b:?}");
+}```
+
+Since `&'a T` is covariant over `'a`, can perform subtyping. Compiler decides `&'static str` can become `&'b str` if and only if `&'static str <: &'b str`. As soon as any immutable/shared borrow type is used, invariance is inherited and compiler blocks bad behavior. Rust has a very strict rule: if mutation is allowed on a value, this is the only value guaranteed to access it.
+
+Example: ```
+let hello = Box<&'static str> = Box::new("hi");
+
+let mut world = Box<'b> str;
+
+world = hello;```
+This is fine as `hello` outlives `world`, as soon as `hello` is moved to a variable only knowing it is alive for `'b`, this destroys the only thing that lives for longer.
+
+Example: `fn get_str() -> &'a str;`
+
+This function claims to produce a `str` bound by some lifetime `'a`, resultingly is valid to provide a function producing a `&'static str` instead. When function is called, all it expects is a `&str` living at least the lifetime of `'a`, it doesn't matter if the value actually lives longer.
+
+Example: `fn store_ref(&'a str);`
+Trying satisfying this with `fn store_static(&'static str);` fails because `'static` outlives `'a` and will not accept `&str` lifetimes shorter than `'static`, covariance does not work unless this is inverted.
+
+Example: ```
+thread_local! {
+    pub static StaticVecs: RefCell<Vec&'static str>> = RefCell::new(Vec::new());
+}
+
+fn store(input: &'static str) {
+    StaticVecs.with_borrow_mut(|v| v.push(input));
+}
+
+fn demo<'a>(input: &'a str, f: fn(&'a str)) {
+    f(input)
+}
+
+fn main() {
+    demo("hello", store);
+
+    {
+        let smuggle = String::from("smuggle");
+
+        // calling demo with store of 'a would not work because input: 'static, this is why function variants are contravariant over their arguments
+        demo(&smuggle, store);
+    }
+
+    StaticVecs.with_borrow(|v| println!("{v:?}");
+}```
+
+All this is fine for standard library defined types, but how is variance determined for user defined types? Structs inherit the variance of its fields, if a struct has a generic argument `A` used in field `a`, the struct's variance over `A` is exactly `a`'s variance over `A`.
+
+- If all uses of `A` are covariant, the struct is covariant over `A`
+- If all uses of `A` are contravariant, the struct is contravariant over `A`
+- Otherwise, the type is invariant over `A`
